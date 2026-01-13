@@ -19,8 +19,42 @@ const createTransporter = () => {
 /**
  * Send OTP email to user
  */
+/**
+ * Send OTP email to user
+ */
 export const sendOTPEmail = async (email: string, otp: string, name: string): Promise<boolean> => {
     try {
+        // Option 1: Use External PHP Mailer (if configured)
+        // This is useful if the Node server is blocked by Gmail/SMTP
+        if (process.env.PHP_MAILER_URL) {
+            console.log(`📧 Using external PHP mailer at: ${process.env.PHP_MAILER_URL}`);
+
+            const response = await fetch(process.env.PHP_MAILER_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email,
+                    subject: 'Verify Your Email - Verdict',
+                    body: `
+                        <h2>Hello ${name},</h2>
+                        <p>Your verification code is: <strong>${otp}</strong></p>
+                        <p>This code expires in 10 minutes.</p>
+                    `
+                })
+            });
+
+            if (response.ok) {
+                console.log(`✅ OTP email sent via PHP mailer to ${email}`);
+                return true;
+            } else {
+                console.error(`❌ PHP Mailer failed via status: ${response.status}`);
+                // Fallback to Nodemailer if PHP fails? Or just return false.
+            }
+        }
+
+        // Option 2: Use Nodemailer (Standard SMTP)
         const transporter = createTransporter();
 
         const mailOptions = {
