@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 // Find your IP: run 'ipconfig' in terminal and look for IPv4 Address
 // Current IP: 192.168.1.33 (update this if your IP changes)
 // For Expo tunnel mode, using localtunnel: https://verdict-api.loca.lt
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = 'https://verdict-jqed.onrender.com/api';
 
 export interface ApiResponse {
     success: boolean;
