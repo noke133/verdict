@@ -120,15 +120,10 @@ async function apiRequest(
 export const Api = {
     // ========== AUTHENTICATION ==========
     auth: {
-        async signup(userData: { name: string; email: string; password: string; role?: string }) {
+        async signup(userData: { name: string; email: string; password: string; role?: string; license?: string }) {
             const response = await apiRequest('/auth/signup', 'POST', userData);
-            return response;
-        },
 
-        async verifyOtp(email: string, otp: string) {
-            const response = await apiRequest('/auth/verify-otp', 'POST', { email, otp });
-
-            // Store token if verification successful
+            // Store token if signup successful (direct login)
             if (response.success && response.data?.token) {
                 await TokenManager.setToken(response.data.token);
             }

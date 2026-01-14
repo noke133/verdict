@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors, Layout } from '../../../constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,139 +7,87 @@ import { Api } from '../../../services/Api';
 
 export default function ClientSignupScreen() {
     const router = useRouter();
-    const [step, setStep] = useState<'details' | 'otp'>('details');
     const [loading, setLoading] = useState(false);
 
     // Form State
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
 
-    // OTP State
-    const [otp, setOtp] = useState('');
-
-    const handleSendOtp = async () => {
-        console.log('[CLIENT-SIGNUP] ===== SEND OTP BUTTON CLICKED =====');
-        console.log('[CLIENT-SIGNUP] Full Name:', fullName);
-        console.log('[CLIENT-SIGNUP] Email:', email);
-        console.log('[CLIENT-SIGNUP] Password length:', password.length);
-
-        if (!fullName || !email || !password) {
-            console.log('[CLIENT-SIGNUP] Validation failed - missing fields');
+    const handleSignup = async () => {
+        if (!fullName || !email || !password || !confirmPassword) {
             Alert.alert('❌ Missing Information', 'Please fill in all fields to continue.');
             return;
         }
 
-        console.log('[CLIENT-SIGNUP] Validation passed, calling API...');
-        setLoading(true);
-        try {
-            const response = await Api.client.sendOtp(email);
-            console.log('[CLIENT-SIGNUP] API Response:', JSON.stringify(response, null, 2));
-
-            if (response.status === 'success') {
-                console.log('[CLIENT-SIGNUP] OTP sent successfully, moving to OTP step');
-                setStep('otp');
-                Alert.alert(
-                    '✅ Success',
-                    response.message || 'Verification code sent to your email. Please check your inbox.',
-                    [{ text: 'OK' }]
-                );
-            } else if (response.message && response.message.includes('already registered')) {
-                console.log('[CLIENT-SIGNUP] Email already registered');
-                Alert.alert('⚠️ Email Already Exists', 'This email is already registered. Please login instead.');
-            } else {
-                console.log('[CLIENT-SIGNUP] OTP sending failed:', response.message);
-                Alert.alert('❌ Error', response.message || 'Failed to send verification code. Please try again.');
-            }
-        } catch (error: any) {
-            console.error('[CLIENT-SIGNUP] Send OTP Unexpected Error:', error);
-            console.error('[CLIENT-SIGNUP] Error stack:', error.stack);
-            Alert.alert(
-                '❌ Connection Error',
-                'Unable to connect to server. Please check your internet connection and try again.'
-            );
-        } finally {
-            setLoading(false);
-            console.log('[CLIENT-SIGNUP] ===== SEND OTP PROCESS COMPLETE =====');
-        }
-    };
-
-    const handleVerifyAndRegister = async () => {
-        console.log('[CLIENT-SIGNUP] ===== VERIFY AND REGISTER CLICKED =====');
-        console.log('[CLIENT-SIGNUP] OTP entered:', otp);
-
-        if (!otp) {
-            console.log('[CLIENT-SIGNUP] OTP validation failed - empty OTP');
-            Alert.alert('❌ Missing Code', 'Please enter the verification code sent to your email.');
+        if (password !== confirmPassword) {
+            Alert.alert('❌ Password Mismatch', 'Passwords do not match.');
             return;
         }
 
-        const userData = {
-            email,
-            otp,
-            full_name: fullName,
-            password
-        };
-
-        console.log('[CLIENT-SIGNUP] User data prepared (password hidden):', {
-            ...userData,
-            password: '***HIDDEN***'
-        });
+        if (password.length < 6) {
+            Alert.alert('❌ Weak Password', 'Password must be at least 6 characters long.');
+            return;
+        }
 
         setLoading(true);
         try {
-            console.log('[CLIENT-SIGNUP] Calling register API...');
-            const response = await Api.client.signup(userData);
-            console.log('[CLIENT-SIGNUP] Register API Response:', JSON.stringify(response, null, 2));
+            const userData = {
+                name: fullName,
+                email,
+                password,
+                role: 'client' // Explicitly set role for client signup
+            };
 
-            if (response.status === 'success') {
-                console.log('[CLIENT-SIGNUP] Registration successful! Redirecting to profile setup');
-                const userId = response.user?.id;
-                console.log('[CLIENT-SIGNUP] User ID from response:', userId);
-                console.log('[CLIENT-SIGNUP] Full user object:', JSON.stringify(response.user, null, 2));
+            console.log('[CLIENT-SIGNUP] Calling signup API...', { ...userData, password: '***' });
+            // Use Api.auth.signup as per backend refactor
+            const response = await Api.auth.signup(userData);
+            console.log('[CLIENT-SIGNUP] Response:', response);
 
-                if (!userId) {
-                    console.error('[CLIENT-SIGNUP] ERROR: No user ID in response!');
-                    // Fallback - go to home without profile setup
-                    Alert.alert(
-                        '🎉 Welcome!',
-                        'Your account has been created successfully!',
-                        [{ text: 'Continue', onPress: () => router.replace('/home') }]
-                    );
-                } else {
+            if (response.success) {
+                // Store token (handled in Api.ts usually, but let's be sure)
+                if (response.data?.token) {
+                    await Api.auth.logout(); // Clear any old token
+                    // Token storage might need to be explicit if Api.auth.signup doesn't do it automatically like login might not?
+                    // Actually Api.auth.verifyOtp did it. Api.auth.signup in Api.ts returns response. 
+                    // We should manually set token if the response includes it.
+                    const { token, user } = response.data;
+                    if (token) {
+                        await import('../../../services/Api').then(m => m.TokenManager.setToken(token));
+                    }
+
                     Alert.alert(
                         '🎉 Welcome!',
                         'Your account has been created successfully!',
                         [{
                             text: 'Continue',
                             onPress: () => {
-                                console.log('[CLIENT-SIGNUP] Navigating to:', `/profile-setup/client?userId=${userId}`);
-                                router.replace(`/profile-setup/client?userId=${userId}`);
+                                if (user?.id) {
+                                    router.replace(`/profile-setup/client?userId=${user.id}`);
+                                } else {
+                                    router.replace('/home');
+                                }
                             }
                         }]
                     );
+                } else {
+                    // Should not happen if success is true based on backend
+                    router.replace('/auth/client/login');
                 }
-            } else if (response.message && response.message.toLowerCase().includes('invalid')) {
-                console.log('[CLIENT-SIGNUP] Invalid OTP');
-                Alert.alert('❌ Invalid Code', 'The verification code you entered is incorrect or has expired. Please try again.');
-            } else if (response.message && response.message.toLowerCase().includes('already')) {
-                console.log('[CLIENT-SIGNUP] Registration failed - duplicate');
-                Alert.alert('⚠️ Already Registered', 'This email is already registered. Please login instead.');
             } else {
-                console.log('[CLIENT-SIGNUP] Registration failed:', response.message);
-                Alert.alert('❌ Registration Failed', response.message || 'Unable to create account. Please try again.');
+                Alert.alert('❌ Registration Failed', response.message || 'Unable to create account.');
             }
         } catch (error: any) {
-            console.error('[CLIENT-SIGNUP] Register Unexpected Error:', error);
-            console.error('[CLIENT-SIGNUP] Error stack:', error?.stack);
-            Alert.alert(
-                '❌ Connection Error',
-                'Unable to connect to server. Please check your internet connection and try again.'
-            );
+            console.error('[CLIENT-SIGNUP] Error:', error);
+            Alert.alert('❌ Error', 'Something went wrong. Please try again.');
         } finally {
             setLoading(false);
-            console.log('[CLIENT-SIGNUP] ===== VERIFY AND REGISTER COMPLETE =====');
         }
+    };
+
+    const handleSocialLogin = (provider: 'apple' | 'google') => {
+        Alert.alert('Coming Soon', `${provider === 'apple' ? 'Apple' : 'Google'} Sign-In will be available soon.`);
     };
 
     return (
@@ -149,117 +97,105 @@ export default function ClientSignupScreen() {
                 style={styles.keyboardView}
             >
                 <View style={styles.headerBar}>
-                    <TouchableOpacity onPress={() => step === 'otp' ? setStep('details') : router.back()} style={styles.backButton}>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                         <Ionicons name="arrow-back" size={24} color={Colors.primary} />
                     </TouchableOpacity>
                 </View>
 
                 <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-                    {step === 'details' ? (
-                        <>
-                            <View style={styles.header}>
-                                <Text style={styles.title}>Create Account</Text>
-                                <Text style={styles.subtitle}>Join Verdict to find the right legal help</Text>
-                            </View>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>Create Account</Text>
+                        <Text style={styles.subtitle}>Join Verdict to find the right legal help</Text>
+                    </View>
 
-                            <View style={styles.form}>
-                                <View style={styles.inputContainer}>
-                                    <Text style={styles.label}>Full Name</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="John Doe"
-                                        placeholderTextColor="#94A3B8"
-                                        autoCapitalize="words"
-                                        value={fullName}
-                                        onChangeText={setFullName}
-                                    />
-                                </View>
+                    <View style={styles.form}>
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Full Name</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="John Doe"
+                                placeholderTextColor="#94A3B8"
+                                autoCapitalize="words"
+                                value={fullName}
+                                onChangeText={setFullName}
+                            />
+                        </View>
 
-                                <View style={styles.inputContainer}>
-                                    <Text style={styles.label}>Email</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="name@example.com"
-                                        placeholderTextColor="#94A3B8"
-                                        autoCapitalize="none"
-                                        keyboardType="email-address"
-                                        value={email}
-                                        onChangeText={setEmail}
-                                    />
-                                </View>
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Email</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="name@example.com"
+                                placeholderTextColor="#94A3B8"
+                                autoCapitalize="none"
+                                keyboardType="email-address"
+                                value={email}
+                                onChangeText={setEmail}
+                            />
+                        </View>
 
-                                <View style={styles.inputContainer}>
-                                    <Text style={styles.label}>Password</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="Create a password"
-                                        placeholderTextColor="#94A3B8"
-                                        secureTextEntry
-                                        value={password}
-                                        onChangeText={setPassword}
-                                    />
-                                </View>
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Password</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Create a password"
+                                placeholderTextColor="#94A3B8"
+                                secureTextEntry
+                                value={password}
+                                onChangeText={setPassword}
+                            />
+                        </View>
 
-                                <TouchableOpacity
-                                    style={styles.signupButton}
-                                    onPress={handleSendOtp}
-                                    disabled={loading}
-                                >
-                                    {loading ? (
-                                        <ActivityIndicator color={Colors.white} />
-                                    ) : (
-                                        <Text style={styles.signupButtonText}>Next</Text>
-                                    )}
-                                </TouchableOpacity>
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Confirm Password</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Confirm your password"
+                                placeholderTextColor="#94A3B8"
+                                secureTextEntry
+                                value={confirmPassword}
+                                onChangeText={setConfirmPassword}
+                            />
+                        </View>
 
-                                <View style={styles.footer}>
-                                    <Text style={styles.footerText}>Already have an account? </Text>
-                                    <TouchableOpacity onPress={() => router.back()}>
-                                        <Text style={styles.linkText}>Sign In</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        </>
-                    ) : (
-                        <>
-                            <View style={styles.header}>
-                                <Text style={styles.title}>Check your Email</Text>
-                                <Text style={styles.subtitle}>We sent a verification code to {email}</Text>
-                            </View>
+                        <TouchableOpacity
+                            style={styles.signupButton}
+                            onPress={handleSignup}
+                            disabled={loading}
+                        >
+                            {loading ? (
+                                <ActivityIndicator color={Colors.white} />
+                            ) : (
+                                <Text style={styles.signupButtonText}>Sign Up</Text>
+                            )}
+                        </TouchableOpacity>
 
-                            <View style={styles.form}>
-                                <View style={styles.inputContainer}>
-                                    <Text style={styles.label}>Verification Code</Text>
-                                    <TextInput
-                                        style={[styles.input, { textAlign: 'center', letterSpacing: 8, fontSize: 24 }]}
-                                        placeholder="000000"
-                                        placeholderTextColor="#94A3B8"
-                                        keyboardType="number-pad"
-                                        maxLength={6}
-                                        value={otp}
-                                        onChangeText={setOtp}
-                                    />
-                                </View>
+                        <View style={styles.dividerContainer}>
+                            <View style={styles.dividerLine} />
+                            <Text style={styles.dividerText}>OR</Text>
+                            <View style={styles.dividerLine} />
+                        </View>
 
-                                <TouchableOpacity
-                                    style={styles.signupButton}
-                                    onPress={handleVerifyAndRegister}
-                                    disabled={loading}
-                                >
-                                    {loading ? (
-                                        <ActivityIndicator color={Colors.white} />
-                                    ) : (
-                                        <Text style={styles.signupButtonText}>Verify & Create Account</Text>
-                                    )}
-                                </TouchableOpacity>
+                        <View style={styles.socialContainer}>
+                            <TouchableOpacity style={styles.socialButton} onPress={() => handleSocialLogin('apple')}>
+                                <Ionicons name="logo-apple" size={24} color="black" />
+                                <Text style={styles.socialButtonText}>Continue with Apple</Text>
+                            </TouchableOpacity>
 
-                                <TouchableOpacity style={styles.footer} onPress={() => setStep('details')}>
-                                    <Text style={styles.linkText}>Change Email</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </>
-                    )}
+                            <TouchableOpacity style={styles.socialButton} onPress={() => handleSocialLogin('google')}>
+                                <Ionicons name="logo-google" size={24} color="black" />
+                                <Text style={styles.socialButtonText}>Continue with Google</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.footer}>
+                            <Text style={styles.footerText}>Already have an account? </Text>
+                            <TouchableOpacity onPress={() => router.back()}>
+                                <Text style={styles.linkText}>Sign In</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
 
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -339,6 +275,40 @@ const styles = StyleSheet.create({
         color: Colors.white,
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    dividerContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: Layout.spacing.md,
+    },
+    dividerLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: '#E2E8F0',
+    },
+    dividerText: {
+        marginHorizontal: Layout.spacing.md,
+        color: '#94A3B8',
+        fontWeight: '600',
+    },
+    socialContainer: {
+        gap: Layout.spacing.md,
+    },
+    socialButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        borderRadius: Layout.borderRadius.lg,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        gap: 12,
+        backgroundColor: Colors.white,
+    },
+    socialButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: Colors.primary,
     },
     footer: {
         flexDirection: 'row',

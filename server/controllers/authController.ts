@@ -2,8 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
-import OTPVerification from '../models/OTPVerification';
-import { sendOTPEmail } from '../services/emailService';
+
 
 // Generate JWT token
 const generateToken = (userId: string): string => {
@@ -11,10 +10,7 @@ const generateToken = (userId: string): string => {
     return jwt.sign({ userId }, secret, { expiresIn: '30d' });
 };
 
-// Generate random OTP
-const generateOTP = (): string => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-};
+
 
 // Signup controller
 export const signup = async (req: Request, res: Response) => {
@@ -42,116 +38,22 @@ export const signup = async (req: Request, res: Response) => {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
 
-        // Generate OTP
-        const otpCode = generateOTP();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        // Delete any existing OTP for this email
-        await OTPVerification.deleteMany({ email: email.toLowerCase() });
-
-        // Store pending registration data in OTP record (don't create user yet)
-        await OTPVerification.create({
-            email: email.toLowerCase(),
-            otpCode,
-            expiresAt,
+        // Create user directly
+        const user = await User.create({
             name,
+            email: email.toLowerCase(),
             passwordHash,
             role,
-            licenseNumber: license
+            licenseNumber: license,
+            isVerified: true
         });
-
-        // Send OTP via email
-        const emailSent = await sendOTPEmail(email, otpCode, name);
-
-        // Log OTP for development (remove in production)
-        console.log(`📧 OTP for ${email}: ${otpCode}`);
-
-        if (!emailSent) {
-            console.warn(`⚠️ Email delivery failed for ${email}, but OTP is logged above`);
-        }
-
-        res.status(201).json({
-            success: true,
-            message: emailSent
-                ? 'Registration initiated. Please check your email for the verification code.'
-                : 'Registration initiated. OTP sent (check server logs if email failed).',
-            data: {
-                email: email.toLowerCase(),
-                emailSent
-            }
-        });
-
-    } catch (error: any) {
-        console.error('Signup error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error during signup',
-            error: error.message
-        });
-    }
-};
-
-// Verify OTP controller
-export const verifyOTP = async (req: Request, res: Response) => {
-    try {
-        const { email, otp } = req.body;
-
-        if (!email || !otp) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email and OTP are required'
-            });
-        }
-
-        // Find OTP record
-        const otpRecord = await OTPVerification.findOne({
-            email: email.toLowerCase(),
-            otpCode: otp
-        });
-
-        if (!otpRecord) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid OTP'
-            });
-        }
-
-        // Check if expired
-        if (otpRecord.expiresAt < new Date()) {
-            await OTPVerification.deleteOne({ _id: otpRecord._id });
-            return res.status(400).json({
-                success: false,
-                message: 'OTP has expired'
-            });
-        }
-
-        // Verify OTP has pending registration data
-        if (!otpRecord.name || !otpRecord.passwordHash) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid OTP record - missing registration data'
-            });
-        }
-
-        // Create user from OTP pending data
-        const user = await User.create({
-            name: otpRecord.name,
-            email: email.toLowerCase(),
-            passwordHash: otpRecord.passwordHash,
-            role: otpRecord.role || 'attorney',
-            licenseNumber: otpRecord.licenseNumber,
-            isVerified: true  // Mark as verified immediately
-        });
-
-        // Delete used OTP
-        await OTPVerification.deleteOne({ _id: otpRecord._id });
 
         // Generate token
         const token = generateToken(user._id.toString());
 
-        res.json({
+        res.status(201).json({
             success: true,
-            message: 'Email verified successfully',
+            message: 'Account created successfully',
             data: {
                 token,
                 user: {
@@ -165,75 +67,18 @@ export const verifyOTP = async (req: Request, res: Response) => {
         });
 
     } catch (error: any) {
-        console.error('Verify OTP error:', error);
+        console.error('Signup error:', error);
         res.status(500).json({
             success: false,
-            message: 'Server error during verification',
+            message: 'Server error during signup',
             error: error.message
         });
     }
 };
 
-// Resend OTP controller
-export const resendOTP = async (req: Request, res: Response) => {
-    try {
-        const { email } = req.body;
 
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email is required'
-            });
-        }
 
-        // Find pending OTP record
-        const otpRecord = await OTPVerification.findOne({ email: email.toLowerCase() });
 
-        if (!otpRecord) {
-            return res.status(404).json({
-                success: false,
-                message: 'No pending registration found for this email'
-            });
-        }
-
-        // Generate new OTP
-        const otpCode = generateOTP();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        // Update OTP record
-        otpRecord.otpCode = otpCode;
-        otpRecord.expiresAt = expiresAt;
-        await otpRecord.save();
-
-        // Send OTP via email
-        const emailSent = await sendOTPEmail(email, otpCode, otpRecord.name || 'User');
-
-        // Log OTP for development
-        console.log(`📧 Resent OTP for ${email}: ${otpCode}`);
-
-        if (!emailSent) {
-            console.warn(`⚠️ Email delivery failed for ${email}, but OTP is logged above`);
-        }
-
-        res.json({
-            success: true,
-            message: emailSent
-                ? 'New verification code sent to your email'
-                : 'New verification code generated (check server logs if email failed)',
-            data: {
-                emailSent
-            }
-        });
-
-    } catch (error: any) {
-        console.error('Resend OTP error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error while resending OTP',
-            error: error.message
-        });
-    }
-};
 
 // Login controller
 export const login = async (req: Request, res: Response) => {
